@@ -14,5 +14,7 @@ void exampleCommand(redisClient* c) {
     addReplyError(c, "example error");
     return;
   }
+  addReplyLongLongWithPrefix(c, sdslen(reply), '$');
   addReplySds(c, reply);
+  addReply(c, shared.crlf);
 }
