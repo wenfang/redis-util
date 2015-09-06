@@ -11,5 +11,6 @@ void freeSubClient(redisClient* c);
 
 int getLongLongReply(redisClient* c, long long* value);
 int getBulkReply(redisClient* c, sds* value);
+int getArrayReply(redisClient* c, sds** value, long long* len);
 
 #endif

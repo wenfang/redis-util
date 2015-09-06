@@ -73,26 +73,63 @@ int getLongLongReply(redisClient* c, long long* value) {
 
   p = strchr(reply, '\r');
   string2ll(reply+1, p-reply-1, value);
+
   if (reply != c->buf) sdsfree(reply);
   return R_REPLY_OK;
 }
 
-int getBulkReply(redisClient* c, sds* value) {
-  sds reply;
-  char* p;
+static sds getOneBulk(char* start) {
   long long bulklen;
-  
-  reply = getReply(c);
+  char* p;
+
+  p = strchr(start, '\r');
+  string2ll(start+1, p-start-1, &bulklen);
+  if (bulklen == -1) {
+    return NULL;
+  }
+  return sdsnewlen(p+2, bulklen);
+}
+
+int getBulkReply(redisClient* c, sds* value) {
+  sds reply = getReply(c);
   if (getReplyType(reply) != R_TYPE_BULK) {
     return R_REPLY_ERR;
   }
 
-  p = strchr(reply, '\r');
-  string2ll(reply+1, p-reply-1, &bulklen);
-  if (bulklen == -1) {
+  *value = getOneBulk(reply);
+  if (*value == NULL) {
     return R_REPLY_ERR;
   }
-  *value = sdscatlen(*value, p+2, bulklen);
+
+  if (reply != c->buf) sdsfree(reply);
+  return R_REPLY_OK;
+}
+
+int getArrayReply(redisClient* c, sds** value, long long* len) {
+  sds reply;
+  char* p;
+  int i;
+
+  reply = getReply(c);
+  if (getReplyType(reply) != R_TYPE_ARRAY) {
+    return R_REPLY_ERR;
+  }
+
+  p = strchr(reply, '\r');
+  string2ll(reply+1, p-reply-1, len);
+  p += 2;
+  if (*len == -1) {
+    return R_REPLY_ERR;
+  }
+  *value = zcalloc(sizeof(sds)*(*len));
+  if (*value == NULL) {
+    return R_REPLY_ERR;
+  }
+
+  for (i=0; i<len; i++) {
+    (*value)[i] = getOneBulk(p);
+  }
+
 
   if (reply != c->buf) sdsfree(reply);
   return R_REPLY_OK;
