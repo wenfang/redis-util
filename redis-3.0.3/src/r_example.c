@@ -22,6 +22,7 @@ void exampleCommand(redisClient* c) {
   incrCommand(subClient);
   res = getrReply(subClient, &reply);
   freeSubClient(subClient);
+
   if (res != R_REPLY_OK || reply.type != R_TYPE_LONGLONG) {
     addReplyError(c, "inner error");
     resetrReply(&reply);
