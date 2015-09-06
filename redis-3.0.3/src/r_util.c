@@ -1,12 +1,5 @@
 #include "r_util.h"
 
-#define R_TYPE_STATUS    0
-#define R_TYPE_ERROR     1
-#define R_TYPE_LONGLONG  2
-#define R_TYPE_BULK      3
-#define R_TYPE_ARRAY     4
-#define R_TYPE_UNKNOWN   5
-
 redisClient* createSubClient(int start, int len, int cap, robj** argv) {
   int i;
   redisClient *subClient;
@@ -27,26 +20,26 @@ void freeSubClient(redisClient* c) {
   freeClient(c);
 }
 
-static sds getReply(redisClient* c) {
-  sds reply;
+static sds getReplySds(redisClient* c) {
+  sds replySds;
   if (listLength(c->reply) == 0 && c->bufpos < REDIS_REPLY_CHUNK_BYTES) {
     c->buf[c->bufpos] = '\0';
-    reply = c->buf;
+    replySds = c->buf;
     c->bufpos = 0;
   } else {
-    reply = sdsnewlen(c->buf, c->bufpos);
+    replySds = sdsnewlen(c->buf, c->bufpos);
     c->bufpos = 0;
     while (listLength(c->reply)) {
       robj* o = listNodeValue(listFirst(c->reply));
-      reply = sdscatlen(reply, o->ptr, sdslen(o->ptr));
+      replySds = sdscatlen(replySds, o->ptr, sdslen(o->ptr));
       listDelNode(c->reply, listFirst(c->reply));
     }
   }
-  return reply;
+  return replySds;
 }
 
-static int getReplyType(char* reply) {
-  char* p = reply;
+static int getReplyType(sds replySds) {
+  char* p = replySds;
   switch (*p) {
   case '+':
     return R_TYPE_STATUS;
@@ -62,49 +55,34 @@ static int getReplyType(char* reply) {
   return R_TYPE_UNKNOWN;
 }
 
-int getLongLongReply(redisClient* c, long long* value) {
-  sds reply;
+static long long getLongLong(sds replySds) {
   char* p;
+  long long value;
 
-  reply = getReply(c);
-  if (getReplyType(reply) != R_TYPE_LONGLONG) {
-    return R_REPLY_ERR;
-  }
+  p = strchr(replySds, '\r');
+  string2ll(replySds+1, p-replySds-1, &value);
 
-  p = strchr(reply, '\r');
-  string2ll(reply+1, p-reply-1, value);
-
-  if (reply != c->buf) sdsfree(reply);
-  return R_REPLY_OK;
+  return value;
 }
 
-static sds getOneBulk(char* start) {
+static sds getStatus(sds replySds) {
+  char* p = strchr(replySds, '\r');
+  return sdsnewlen(replySds+1, p-replySds-1);
+}
+
+static sds getBulk(sds replySds) {
   long long bulklen;
   char* p;
 
-  p = strchr(start, '\r');
-  string2ll(start+1, p-start-1, &bulklen);
+  p = strchr(replySds, '\r');
+  string2ll(replySds+1, p-replySds-1, &bulklen);
   if (bulklen == -1) {
     return NULL;
   }
   return sdsnewlen(p+2, bulklen);
 }
 
-int getBulkReply(redisClient* c, sds* value) {
-  sds reply = getReply(c);
-  if (getReplyType(reply) != R_TYPE_BULK) {
-    return R_REPLY_ERR;
-  }
-
-  *value = getOneBulk(reply);
-  if (*value == NULL) {
-    return R_REPLY_ERR;
-  }
-
-  if (reply != c->buf) sdsfree(reply);
-  return R_REPLY_OK;
-}
-
+/*
 int getArrayReply(redisClient* c, sds** value, long long* len) {
   sds reply;
   char* p;
@@ -133,4 +111,50 @@ int getArrayReply(redisClient* c, sds** value, long long* len) {
 
   if (reply != c->buf) sdsfree(reply);
   return R_REPLY_OK;
+}
+*/
+
+int getrReply(redisClient* c, r_reply* reply) {
+  int res = R_REPLY_OK;
+  sds replySds;
+
+  replySds = getReplySds(c);
+  reply->type = getReplyType(replySds);
+  if (reply->type == R_TYPE_LONGLONG) {
+    reply->value = getLongLong(replySds);
+  } else if (reply->type == R_TYPE_STATUS || reply->type == R_TYPE_ERROR) {
+    reply->mbulks = 1;
+    reply->bulks = zcalloc(sizeof(sds)*reply->mbulks);
+    reply->bulks[0] = getStatus(replySds); 
+  } else if (reply->type == R_TYPE_BULK) {
+    reply->mbulks = 1;
+    reply->bulks = zcalloc(sizeof(sds)*reply->mbulks);
+    reply->bulks[0] = getBulk(replySds);
+    if (reply->bulks[0] == NULL) res = R_REPLY_ERR;
+  } else if (reply->type == R_TYPE_ARRAY) {
+  }
+
+  if (replySds != c->buf) sdsfree(replySds);
+  return res;
+}
+
+void initrReply(r_reply* reply) {
+  reply->type = R_TYPE_UNKNOWN;
+  reply->value = 0;
+  reply->bulks = NULL;
+  reply->mbulks = 0; 
+}
+
+void resetrReply(r_reply* reply) {
+  int i;
+
+  reply->type = R_TYPE_UNKNOWN;
+  reply->value = 0;
+
+  for (i=0; i<reply->mbulks; i++) {
+    sdsfree(reply->bulks[i]);
+  }
+  reply->bulks = NULL;
+
+  reply->mbulks = 0;
 }
