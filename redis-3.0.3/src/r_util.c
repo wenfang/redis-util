@@ -8,7 +8,7 @@ redisClient* createSubClient(int start, int len, int cap, robj** argv) {
   subClient->flags |= REDIS_LUA_CLIENT;
   subClient->argc = 0;
   subClient->argv = zmalloc(sizeof(robj*)*cap);
-  subClient->argv[subClient->argc++] = createStringObject("fack", 4);
+  subClient->argv[subClient->argc++] = createStringObject("sub", 3);
   for (i=0; i<len; i++) {
     subClient->argv[subClient->argc++] = dupStringObject(argv[start+i]);
   }
@@ -70,53 +70,27 @@ static sds getStatus(sds replySds) {
   return sdsnewlen(replySds+1, p-replySds-1);
 }
 
-static sds getBulk(sds replySds) {
+static sds getBulk(sds replySds, long long *step, r_reply* reply) {
   long long bulklen;
   char* p;
 
   p = strchr(replySds, '\r');
   string2ll(replySds+1, p-replySds-1, &bulklen);
-  if (bulklen == -1) {
-    return NULL;
-  }
-  return sdsnewlen(p+2, bulklen);
+  if (step != NULL) *step = p+2+bulklen+2-replySds;
+  redisLog(REDIS_WARNING, "bulks1: %d, %lld, %X, %X", reply->type, reply->value, reply->bulks[0], reply->bulks[1]);
+  sds res = sdsnewlen(p+2, bulklen);
+  redisLog(REDIS_WARNING, "dst: %X, src: %X, bulks: %X, len: %lld", res, p+2, reply->bulks, bulklen);
+  redisLog(REDIS_WARNING, "bulks2: %d, %lld, %X, %X", reply->type, reply->value, reply->bulks[0], reply->bulks[1]);
+  
+  return res;
 }
-
-/*
-int getArrayReply(redisClient* c, sds** value, long long* len) {
-  sds reply;
-  char* p;
-  int i;
-
-  reply = getReply(c);
-  if (getReplyType(reply) != R_TYPE_ARRAY) {
-    return R_REPLY_ERR;
-  }
-
-  p = strchr(reply, '\r');
-  string2ll(reply+1, p-reply-1, len);
-  p += 2;
-  if (*len == -1) {
-    return R_REPLY_ERR;
-  }
-  *value = zcalloc(sizeof(sds)*(*len));
-  if (*value == NULL) {
-    return R_REPLY_ERR;
-  }
-
-  for (i=0; i<len; i++) {
-    (*value)[i] = getOneBulk(p);
-  }
-
-
-  if (reply != c->buf) sdsfree(reply);
-  return R_REPLY_OK;
-}
-*/
 
 int getrReply(redisClient* c, r_reply* reply) {
   int res = R_REPLY_OK;
   sds replySds;
+  char *p;
+  int i;
+  long long step;
 
   replySds = getReplySds(c);
   reply->type = getReplyType(replySds);
@@ -129,9 +103,18 @@ int getrReply(redisClient* c, r_reply* reply) {
   } else if (reply->type == R_TYPE_BULK) {
     reply->mbulks = 1;
     reply->bulks = zcalloc(sizeof(sds)*reply->mbulks);
-    reply->bulks[0] = getBulk(replySds);
-    if (reply->bulks[0] == NULL) res = R_REPLY_ERR;
+    reply->bulks[0] = getBulk(replySds, NULL, reply);
   } else if (reply->type == R_TYPE_ARRAY) {
+    p = strchr(replySds, '\r');
+    string2ll(replySds+1, p-replySds-1, &reply->mbulks); 
+    reply->bulks = zcalloc(sizeof(sds)*reply->mbulks);
+    redisLog(REDIS_WARNING, "bulks memory: %X", reply->bulks);
+    p += 2;
+    for (i=0; i<(int)reply->mbulks; i++) {
+      redisLog(REDIS_WARNING, "i: %d", i);
+      reply->bulks[i] = getBulk(p, &step, reply);
+      p += step;
+    }
   }
 
   if (replySds != c->buf) sdsfree(replySds);
@@ -154,6 +137,7 @@ void resetrReply(r_reply* reply) {
   for (i=0; i<reply->mbulks; i++) {
     sdsfree(reply->bulks[i]);
   }
+  zfree(reply->bulks);
   reply->bulks = NULL;
 
   reply->mbulks = 0;

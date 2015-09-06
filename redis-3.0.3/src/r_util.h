@@ -17,7 +17,7 @@ typedef struct r_reply {
   int       type;
   long long value;
   sds*      bulks;
-  int       mbulks;
+  long long mbulks;
 } r_reply;
 
 redisClient* createSubClient(int start, int len, int cap, robj** argv);
