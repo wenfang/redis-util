@@ -1,20 +1,23 @@
 #include "r_util.h"
-#include "redis.h"
 
-redisClient* createFackClient(int start, int len, int cap, robj** argv) {
+redisClient* createSubClient(int start, int len, int cap, robj** argv) {
   int i;
-  redisClient *fackClient;
+  redisClient *subClient;
 
-  fackClient = createClient(-1);
-  fackClient->flags |= REDIS_LUA_CLIENT;
-  fackClient->argc = 0;
-  fackClient->argv = zmalloc(sizeof(robj*)*cap);
-  fackClient->argv[fackClient->argc++] = createStringObject("fack", 4);
+  subClient = createClient(-1);
+  subClient->flags |= REDIS_LUA_CLIENT;
+  subClient->argc = 0;
+  subClient->argv = zmalloc(sizeof(robj*)*cap);
+  subClient->argv[subClient->argc++] = createStringObject("fack", 4);
   for (i=0; i<len; i++) {
-    fackClient->argv[fackClient->argc++] = dupStringObject(argv[start+i]);
+    subClient->argv[subClient->argc++] = dupStringObject(argv[start+i]);
   }
 
-  return fackClient;
+  return subClient;
+}
+
+void freeSubClient(redisClient* c) {
+  freeClient(c);
 }
 
 static sds getReply(redisClient* c) {
