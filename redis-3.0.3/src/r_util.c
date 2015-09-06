@@ -70,19 +70,18 @@ static sds getStatus(sds replySds) {
   return sdsnewlen(replySds+1, p-replySds-1);
 }
 
-static sds getBulk(sds replySds, long long *step, r_reply* reply) {
+static sds getBulk(sds replySds, long long *step) {
   long long bulklen;
   char* p;
 
   p = strchr(replySds, '\r');
   string2ll(replySds+1, p-replySds-1, &bulklen);
+  if (bulklen == -1) {
+    if (step != NULL) *step = p+2-replySds;
+    return sdsempty();
+  }
   if (step != NULL) *step = p+2+bulklen+2-replySds;
-  redisLog(REDIS_WARNING, "bulks1: %d, %lld, %X, %X", reply->type, reply->value, reply->bulks[0], reply->bulks[1]);
-  sds res = sdsnewlen(p+2, bulklen);
-  redisLog(REDIS_WARNING, "dst: %X, src: %X, bulks: %X, len: %lld", res, p+2, reply->bulks, bulklen);
-  redisLog(REDIS_WARNING, "bulks2: %d, %lld, %X, %X", reply->type, reply->value, reply->bulks[0], reply->bulks[1]);
-  
-  return res;
+  return sdsnewlen(p+2, bulklen);
 }
 
 int getrReply(redisClient* c, r_reply* reply) {
@@ -103,16 +102,14 @@ int getrReply(redisClient* c, r_reply* reply) {
   } else if (reply->type == R_TYPE_BULK) {
     reply->mbulks = 1;
     reply->bulks = zcalloc(sizeof(sds)*reply->mbulks);
-    reply->bulks[0] = getBulk(replySds, NULL, reply);
+    reply->bulks[0] = getBulk(replySds, NULL);
   } else if (reply->type == R_TYPE_ARRAY) {
     p = strchr(replySds, '\r');
     string2ll(replySds+1, p-replySds-1, &reply->mbulks); 
     reply->bulks = zcalloc(sizeof(sds)*reply->mbulks);
-    redisLog(REDIS_WARNING, "bulks memory: %X", reply->bulks);
     p += 2;
     for (i=0; i<(int)reply->mbulks; i++) {
-      redisLog(REDIS_WARNING, "i: %d", i);
-      reply->bulks[i] = getBulk(p, &step, reply);
+      reply->bulks[i] = getBulk(p, &step);
       p += step;
     }
   }
@@ -134,11 +131,13 @@ void resetrReply(r_reply* reply) {
   reply->type = R_TYPE_UNKNOWN;
   reply->value = 0;
 
-  for (i=0; i<reply->mbulks; i++) {
-    sdsfree(reply->bulks[i]);
+  if (reply->mbulks) {
+    for (i=0; i<reply->mbulks; i++) {
+      sdsfree(reply->bulks[i]);
+    }
+    zfree(reply->bulks);
+    reply->bulks = NULL;
   }
-  zfree(reply->bulks);
-  reply->bulks = NULL;
 
   reply->mbulks = 0;
 }
