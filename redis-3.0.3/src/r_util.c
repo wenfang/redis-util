@@ -1,5 +1,12 @@
 #include "r_util.h"
 
+#define R_TYPE_STATUS    0
+#define R_TYPE_ERROR     1
+#define R_TYPE_LONGLONG  2
+#define R_TYPE_BULK      3
+#define R_TYPE_ARRAY     4
+#define R_TYPE_UNKNOWN   5
+
 redisClient* createSubClient(int start, int len, int cap, robj** argv) {
   int i;
   redisClient *subClient;
@@ -38,14 +45,55 @@ static sds getReply(redisClient* c) {
   return reply;
 }
 
-long long getLongLongReply(redisClient* c) {
-  char* p;
-  long long value;
+static int getReplyType(char* reply) {
+  char* p = reply;
+  switch (*p) {
+  case '+':
+    return R_TYPE_STATUS;
+  case '-':
+    return R_TYPE_ERROR;
+  case ':':
+    return R_TYPE_LONGLONG;
+  case '$':
+    return R_TYPE_BULK;
+  case '*':
+    return R_TYPE_ARRAY;
+  }
+  return R_TYPE_UNKNOWN;
+}
+
+int getLongLongReply(redisClient* c, long long* value) {
   sds reply;
+  char* p;
 
   reply = getReply(c);
+  if (getReplyType(reply) != R_TYPE_LONGLONG) {
+    return R_REPLY_ERR;
+  }
+
   p = strchr(reply, '\r');
-  string2ll(reply+1, p-reply-1, &value);
+  string2ll(reply+1, p-reply-1, value);
   if (reply != c->buf) sdsfree(reply);
-  return value;
+  return R_REPLY_OK;
+}
+
+int getBulkReply(redisClient* c, sds* value) {
+  sds reply;
+  char* p;
+  long long bulklen;
+  
+  reply = getReply(c);
+  if (getReplyType(reply) != R_TYPE_BULK) {
+    return R_REPLY_ERR;
+  }
+
+  p = strchr(reply, '\r');
+  string2ll(reply+1, p-reply-1, &bulklen);
+  if (bulklen == -1) {
+    return R_REPLY_ERR;
+  }
+  *value = sdscatlen(*value, p+2, bulklen);
+
+  if (reply != c->buf) sdsfree(reply);
+  return R_REPLY_OK;
 }
