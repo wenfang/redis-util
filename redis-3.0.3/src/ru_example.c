@@ -1,34 +1,32 @@
-#include "r_util.h"
+#include "ru_util.h"
 
 void exampleCommand(redisClient* c) {
-  int res;
-  r_reply reply;
+  ru_reply* reply;
   redisClient *subClient;
 
-  initrReply(&reply);
   subClient = createSubClient(1, 1, 2, c->argv);
   incrCommand(subClient);
-  res = getrReply(subClient, &reply);
+  reply = createRuReply(subClient);
   freeSubClient(subClient);
 
-  if (res != R_REPLY_OK || reply.type != R_TYPE_LONGLONG) {
-    addReplyError(c, "inner error");
-    resetrReply(&reply);
+  if (reply->type != RU_TYPE_LONGLONG) {
+    addReplyError(c, "inner error 1");
+    freeRuReply(reply);
     return;
   }
-  resetrReply(&reply);
+  freeRuReply(reply);
 
   subClient = createSubClient(2, 1, 2, c->argv);
   incrCommand(subClient);
-  res = getrReply(subClient, &reply);
+  reply = createRuReply(subClient);
   freeSubClient(subClient);
 
-  if (res != R_REPLY_OK || reply.type != R_TYPE_LONGLONG) {
-    addReplyError(c, "inner error");
-    resetrReply(&reply);
+  if (reply->type != RU_TYPE_LONGLONG) {
+    addReplyError(c, "inner error 2");
+    freeRuReply(reply);
     return;
   }
-  resetrReply(&reply);
+  freeRuReply(reply);
 
   addReply(c, shared.ok);
 }
